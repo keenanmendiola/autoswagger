@@ -13,7 +13,7 @@ from langchain.chat_models import ChatOpenAI
 from langchain.utilities import TextRequestsWrapper
 
 def getSteps(user_input):
-    llm = OpenAI(openai_api_key="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", temperature=0)
+    llm = OpenAI(openai_api_key="APITOKENHERE", temperature=0)
 
     template = """
         ### System:
@@ -39,7 +39,7 @@ def getSteps(user_input):
 
 def generateCode(steps):
     agent_executor = create_python_agent(
-        llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", openai_api_key="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"),
+        llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", openai_api_key="APITOKENHERE"),
         tool=PythonREPLTool(),
         verbose=True,
         agent="chat-zero-shot-react-description",
@@ -70,7 +70,7 @@ def generateCode(steps):
     final_prompt = prompt.format(steps=steps)
 
     code = agent_executor.run(final_prompt)
-    
+
     return code
 
 def main():
