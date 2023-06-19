@@ -1,19 +1,16 @@
 import streamlit as st
 from dotenv import load_dotenv
 import os
-from langchain import OpenAI, Wikipedia, PromptTemplate
-from langchain.agents import initialize_agent, Tool, load_tools
+from langchain import OpenAI, PromptTemplate
 from langchain.agents import AgentType
-from langchain.agents.react.base import DocstoreExplorer
 from langchain.agents.agent_toolkits import create_python_agent
 from langchain.tools.python.tool import PythonREPLTool
 from langchain.python import PythonREPL
 from langchain.agents.agent_types import AgentType
 from langchain.chat_models import ChatOpenAI
-from langchain.utilities import TextRequestsWrapper
 
 def getSteps(user_input):
-    llm = OpenAI(openai_api_key="APITOKENHERE", temperature=0)
+    llm = OpenAI(openai_api_key="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", temperature=0)
 
     template = """
         ### System:
@@ -39,7 +36,7 @@ def getSteps(user_input):
 
 def generateCode(steps):
     agent_executor = create_python_agent(
-        llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", openai_api_key="APITOKENHERE"),
+        llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", openai_api_key="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"),
         tool=PythonREPLTool(),
         verbose=True,
         agent="chat-zero-shot-react-description",
@@ -70,7 +67,7 @@ def generateCode(steps):
     final_prompt = prompt.format(steps=steps)
 
     code = agent_executor.run(final_prompt)
-
+    
     return code
 
 def main():
