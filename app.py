@@ -13,6 +13,8 @@ import json
 import ast
 import re
 import requests
+import pandas as pd
+
 load_dotenv()
 
 openai.api_key=os.getenv('OPEN_API_KEY')
@@ -50,68 +52,37 @@ def getSteps(context, link):
     st.write(result)
     return result
 
-def generateCode(steps):
-
-    template = """
-        ### System:
-        You are a senior back end python developer specialising in API integration.
-        Let us think step-by-step to make sure we get the right answer.
-        If you are not sure about the code then please let us know and build it in to a python class that can be reused
-        Generate code based on the steps below
-
-        ### User:
-        Given the steps provided below, produce a python code.
-        
-        ### Steps:
-        {steps}
-    """
-
-    prompt = PromptTemplate(
-        input_variables=["steps"],
-        template = template
-    )
-
-    final_prompt = prompt.format(steps=steps)
-
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=final_prompt,
-        max_tokens=2048,  # Adjust based on desired code length
-        n=1,             # Number of code samples to generate
-        stop=None,       # Specify an optional stop condition for generated code
-        temperature=0  # Controls the randomness of the generated code
-    )
-    code =  response.choices[0].text.strip()
-    
-    return code
-
-def generateCodeFromSwagger(URL, language):
+def generateCode(URL, body, params, query_string, security_header):
     template = """
             ### System:
             You are a senior back end developer specialising in API integration.
-            If you are not sure about the code then please let us know and build it in to a class that can be reused.
-            Based on the Swagger URL provided below, generate an API call using the language provided below.
-            Include any necessary packages needed.
-            If the request you are making needs a request body or request header, add placeholder values to it.
-            If the langauge requested is javascript, write a javascript code using node.js and axios.
-            Response should be code wrapped in a function.
-
+            
             ### User:
-            Analyze the API document in the Swagger URL and create an API call based on the what you analyzed written in the language provide below.
+            Create a python function to perform a network request based on the URL, body, params, query_string, and security_header provided below.
+            For the security header line, add a comment saying 'Add this to your environment variables.'
             
             ### URL:
             {URL}
 
-            ### language:
-            {language}
+            ### body:
+            {body}
+
+            ### params:
+            {params}
+
+            ### query_string:
+            {query_string}
+
+            ### security_header:
+            {security_header}
         """
     
     prompt = PromptTemplate(
-        input_variables=["URL", "language"],
+        input_variables=["URL", "body", "params", "query_string", "security_header"],
         template = template
     )
 
-    final_prompt = prompt.format(URL=URL, language=language)
+    final_prompt = prompt.format(URL=URL, body=body, params=params, query_string=query_string, security_header=security_header)
 
 
     response = openai.Completion.create(
@@ -123,22 +94,41 @@ def generateCodeFromSwagger(URL, language):
         temperature=0  
     )
     code =  response.choices[0].text.strip()
-    requestDetails = getRequestDetails(URL)
+    return code
 
-    # json_string = remove_starting_characters(requestDetails)
-    # input_dictionary = json_to_dict(json_string)
+def readSwaggerDoc(swaggerLink):
+    template = """
+        ### System:
+        Understand, you are a senior back end developer specialising in API integration.
+        A swagger documentation provides a list of endpoints and its details such as request body, parameters, queries.
+
+        ### User:
+        Analyze the API document in the Swagger URL and answer with the following:
+            - the link to the JSON file of the Swagger URL, only return the link of the JSON file.
+        It is possible that the JSON file link is written in a different format.
+        
+        ### URL:
+        {URL}
+    """
     
-    # return code, input_dictionary
-    return code, requestDetails
+    prompt = PromptTemplate(
+        input_variables=["URL"],
+        template = template
+    )
 
+    final_prompt = prompt.format(URL=swaggerLink)
 
-def remove_starting_characters(text):
-    start_index = text.find('{')
-    if start_index != -1:
-        json_string = text[start_index:]
-        return json_string
-    else:
-        return None
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=final_prompt,
+        max_tokens=2048, 
+        n=1,            
+        stop=None,       
+        temperature=0  
+    )
+    swaggerJsonLink =  response.choices[0].text.strip()
+    
+    return swaggerJsonLink 
     
 def json_to_dict(json_string):
     try:
@@ -194,158 +184,38 @@ def getRequestDetails(url):
     
     return request 
 
-def generateCodeForRequest(input_dictionary, form_results):
-    agent_executor = create_python_agent(
-        llm=ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613", openai_api_key=os.getenv('OPEN_API_KEY')),
-        tool=PythonREPLTool(),
-        verbose=True,
-        agent_type=AgentType.OPENAI_FUNCTIONS,
-        agent_executor_kwargs={"handle_parsing_errors": True},
-    )
+def getBaseApiURL(url):
+    template = """
+            ### System:
+            Understand, you are a senior back end developer specialising in API integration.
+            A swagger documentation provides endpoint details such as request body, parameters, queries.
 
-    prompt = """
-        ### System
-        You are a senior python developer trying to call an API endpoint that will create a python function to call the API in the url below.
+            ### User:
+            Analyze the API document in the Swagger URL and answer with the following:
+            - The base url for the API, only answer with the base url.
 
-        ### User:
-        Below is the url of the API endpoint that needs to be called.
-        Also included below are the request params/body possible values for the the request.
-        And also, the actual values that are needed to be inputted in the request body/params/query.
-        Use the request params/body possible values as reference and match it with the values provided to create your request.
-        Given that, create a python function that will call the endpoint and return it.
-        Answer with the python code you made.
-
-        ### url
-        {url}
-
-        ### values
-        {values}
-
-        ## request params/body possible values
-        {schema}
-
-    """
-
-    prompt = PromptTemplate(
-        input_variables=["url", "values", "schema"],
-        template = prompt
-    )
-
-    final_prompt = prompt.format(url=input_dictionary["link"], values=form_results, schema=input_dictionary["data"])
-
-    result = agent_executor.run(final_prompt)
-    st.write(result)
-    runGeneratedCode(result)
+            ### URL:
+            {url}
+        """
     
-    return result
-
-# def getRequestDetails():
-
-
-def runGeneratedCode(code):
-    agent_executor = create_python_agent(
-        llm=ChatOpenAI(temperature=0, model="gpt-4", openai_api_key=os.getenv('OPEN_API_KEY')),
-        tool=PythonREPLTool(),
-        verbose=True,
-        agent_type=AgentType.OPENAI_FUNCTIONS,
-        agent_executor_kwargs={"handle_parsing_errors": True},
-    )
-
-    prompt = """
-        Understand, you are provided with a python function below.
-        Based on the import statements in the code, install any necessary packages.
-        After installing the packages, run the code and respond to be the result of the function call.
-        {code}
-    """
-
     prompt = PromptTemplate(
-        input_variables=["code"],
-        template = prompt
+        input_variables=["url"],
+        template = template
     )
 
-    final_prompt = prompt.format(code=code)
+    final_prompt = prompt.format(url=url)
 
-    result = agent_executor.run(final_prompt)
-
-    st.write(result)
-
-def render_form(json_data):
-
-    form_results = {}
-
-    for field in json_data["data"]:
-        field_name = field["fieldName"]
-        field_type = field["type"]
-        field_options = field["options"]
-
-        st.markdown(f"## {field_name}")
-
-        if field_type == "string":
-            if field_options:
-                selected_option = st.selectbox("", field_options, key=f"select_{field_name}")
-                form_results[field_name] = selected_option
-                st.write(f"Selected Option: {selected_option}")
-            else:
-                user_input = st.text_input("", key=f"text_{field_name}")
-                form_results[field_name] = user_input
-                st.write(f"Entered Value: {user_input}")
-        elif field_type == "number":
-            if field_options:
-                selected_option = st.selectbox("", field_options, key=f"select_{field_name}")
-                form_results[field_name] = selected_option
-                st.write(f"Selected Option: {selected_option}")
-            else:
-                user_input = st.number_input("", key=f"number_{field_name}")
-                form_results[field_name] = user_input
-                st.write(f"Entered Value: {user_input}")
-        elif field_type == "boolean":
-            user_input = st.checkbox("", value=False, key=f"checkbox_{field_name}")
-            form_results[field_name] = user_input
-            st.write(f"Value: {user_input}")
-        else:
-            st.write("Unsupported field type")
-
-        st.markdown("---")
-
-    if st.button("Call the API"):
-        return form_results
-
-def create_input_field(param_name, param_type, options):
-    # Helper function to create different types of input fields
-    if param_type == "integer":
-        return st.number_input(param_name)
-    elif param_type == "string":
-        return st.text_input(param_name)
-    elif param_type == "boolean":
-        return st.checkbox(param_name)
-    elif param_name in options:
-        return st.selectbox(param_name, options[param_name]['options'])
-    else:
-        st.warning(f"Unknown data type: {param_type}")
-        return None
-
-def parse_json_string(json_str):
-    # use ast.literal_eval() to parse non-quoted keys of the JSON string
-    try:
-        fixed_json = ast.literal_eval(json_str)
-    except (ValueError, SyntaxError) as e:
-        print(e)
-        return None
-
-    # use json.dumps() and json.loads() to normalize the JSON string
-    try:
-        fixed_json = json.loads(json.dumps(fixed_json))
-        return fixed_json
-    except ValueError as e:
-        print(e)
-        return None
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=final_prompt,
+        max_tokens=2048, 
+        n=1,            
+        stop=None,       
+        temperature=0  
+    )
+    request =  response.choices[0].text.strip()
     
-def url_builder(url: str, params: dict) -> str:
-    if '{' not in url or '}' not in url:
-        return url
-    for key, value in params.items():
-        url = url.replace('{' + key + '}', str(value))
-    return url
+    return request 
 
 def call_api(url, body=None, params=None, query_string=None, http_verb='GET'):
     """
@@ -384,6 +254,40 @@ def call_api(url, body=None, params=None, query_string=None, http_verb='GET'):
     # Return the response object
     return response
 
+def find_url(string):
+    regex = r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
+    url = re.search(regex, string)
+    
+    if url:
+        return url.group()
+    else:
+        return None
+
+def extract_sub_dicts_with_key_value(dictionary, key, value):
+    results = []
+    for k, v in dictionary.items():
+        if isinstance(v, dict):
+            # Recursively search through the sub-dictionary
+            sub_results = extract_sub_dicts_with_key_value(v, key, value)
+            results.extend(sub_results)
+        elif k == key and v == value:
+            # Found a match, add the sub-dictionary to the results list
+            results.append(dictionary)
+    return results
+
+def replace_placeholders(url, data):
+    has_placeholder = False
+    
+    for item in data:
+        if item["name"] in url:
+            has_placeholder = True
+            url = url.replace("{" + item["name"] + "}", str(item["value"]))
+    
+    if not has_placeholder:
+        return url
+    
+    return url
+
 def main():
     st.set_page_config(page_title = "Some Webpage", page_icon = ":tada:", layout="wide")
 
@@ -408,86 +312,115 @@ def main():
     #         # st.write(code)
     #     elif selected_option == 'Swagger Documentation':
     link = st.text_input("Enter link here")
-    code, requestDetails = generateCodeFromSwagger(link, "Python")
-    st.write(code)
-    parsed_json = requestDetails.replace(" ", "")[11:]
-    json_dict = json.loads(parsed_json)
-    st.write(json_dict)
-    request = json_dict["request"]
 
-
-    with st.form("request_form"):
-
-        # request_form = st.form(key="request_form")
-        st.subheader(json_dict["link"])
-        st.subheader(json_dict["request"]["type"])
-        st.subheader("Body")
-        body_values = {}
-        for key, val in request["body"].items():
-            if val == "integer":
-                body_values[key] = st.number_input(f"Enter {key}", value=1)
-            elif val == "string":
-                if key in request["schema"]:
-                    if request["schema"][key]["options"] != []:
-                        body_values[key] = st.selectbox(f"Select {key}", options=request["schema"][key]["options"], key=f"query_{key}")
-                    else:
-                        body_values[key] = st.text_input(f"Enter {key}", key=f"query_{key}")
+    # if st.button("Submit"):
+    output = readSwaggerDoc(link)
+    url = find_url(output)
+    baseUrl = getBaseApiURL(url)
+    st.write(baseUrl)
+    response = requests.get(url)
+    
+    try:
+        swagger_data = response.json()
+        grouped_paths = {}
+        for path, path_details in swagger_data['paths'].items():
+            for verb, verb_details in path_details.items():
+                tag = verb_details.get('tags', ['Other'])[0]  # Default tag 'Other' if not specified
+                row = {
+                    'Path': path,
+                    'HTTP Verb': verb.upper(),
+                    'Description': verb_details.get('description', '')
+                }
+                if tag in grouped_paths:
+                    grouped_paths[tag].append(row)
                 else:
-                    body_values[key] = st.text_input(f"Enter {key}", key=f"query_{key}")
-            elif val == "date-time":
-                body_values[key] = st.date_input(f"Enter {key}")
-            elif val == "boolean":
-                body_values[key] = st.checkbox(f"Select {key}", value=True)
+                    grouped_paths[tag] = [row]
 
-        # Create input fields for each key-value pair in the params object
-        st.subheader("Params")
-        params_values = {}
-        for key, val in request["params"].items():
-            if val == "integer":
-                params_values[key] = st.number_input(f"Enter {key}", key=f"params_{key}", value=1)
-            elif val == "string":
-                if key in request["schema"]:
-                    if request["schema"][key]["options"] != []:
-                        params_values[key] = st.selectbox(f"Select {key}", options=request["schema"][key]["options"], key=f"query_{key}")
-                    else:
-                        params_values[key] = st.text_input(f"Enter {key}", key=f"query_{key}")
-                else:
-                    params_values[key] = st.text_input(f"Enter {key}", key=f"query_{key}")
-            elif val == "date-time":
-                params_values[key] = st.date_input(f"Enter {key}", key=f"params_{key}")
-            elif val == "boolean":
-                params_values[key] = st.checkbox(f"Select {key}", key=f"params_{key}", value=True)
+        # Display tables for each tag
+        for tag, paths in grouped_paths.items():
+            st.subheader(f"Tag: {tag}")
+            st.table(pd.DataFrame(paths))
 
-        # Create input fields and dropdown menus for each key-value pair in the query object
-        st.subheader("Query")
-        query_values = {}
-        for key, val in request["query"].items():
-            if val == "integer":
-                query_values[key] = st.number_input(f"Enter {key}", key=f"query_{key}", value=1)
-            elif val == "string":
-                if key in request["schema"]:
-                    if request["schema"][key]["options"] != []:
-                        query_values[key] = st.selectbox(f"Select {key}", options=request["schema"][key]["options"], key=f"query_{key}")
-                    else:
-                        query_values[key] = st.text_input(f"Enter {key}", key=f"query_{key}")
-                else:
-                    query_values[key] = st.text_input(f"Enter {key}", key=f"query_{key}")
-            elif val == "date-time":
-                query_values[key] = st.date_input(f"Enter {key}", key=f"query_{key}")
-            elif val == "boolean":
-                query_values[key] = st.checkbox(f"Select {key}", key=f"query_{key}", value=True)
+        paths = swagger_data['paths']
 
-        submitted = st.form_submit_button("Call the API")
+        security = ['apiKey', 'oauth2']
+        selected_security = st.selectbox('Select an option:', security)
+
+        if selected_security == "apiKey":
+            key = st.text_input("Enter API Key")
+        elif selected_security == "apiKey":
+            key = st.text_input("Enter Client Id")
+            
+        # Create a dropdown list with the paths
+        selected_path = st.selectbox('Select a path', list(paths.keys()))
         
-        if submitted:
-            merged_dict = {}
-            merged_dict.update(body_values)
-            merged_dict.update(params_values)
-            merged_dict.update(query_values)
-            url = url_builder(json_dict["link"], merged_dict)
-            st.write(url)
-            response = call_api(url, body=body_values, params= params_values, query_string= query_values, http_verb=json_dict["request"]["type"])
-            st.write(response.json())
+        # Get the request details for the selected path
+        request_details = paths[selected_path]
+        # st.write(request_details)
+
+        # Check if there are any parameters defined for the selected path
+        verb = next(iter(request_details))
+        if 'parameters' in request_details[verb]:
+            parameters = request_details[verb]['parameters']
+        else:
+            st.write("Empty")
+            parameters = []
+
+        request_dict = {}
+        # Create a dynamic form based on the request details
+        # with st.form(key='dynamic_form'):
+        # Iterate over the parameters and create the corresponding input fields
+
+
+
+        for parameter in parameters:
+            param_name = parameter['name']
+            param_type = parameter['type']
+            param_options = parameter.get('items', [])
+            param_in = parameter["in"]
+
+            # Determine the appropriate input field based on the parameter type
+            if param_type == 'string':
+                value = st.text_input(param_name)
+            elif param_type == 'integer':
+                value = st.number_input(param_name, step=1, value=0)
+            elif param_type == 'boolean':
+                value = st.checkbox(param_name)
+            elif param_type == 'array':
+                if param_options:
+                    value = st.selectbox('Select a value', list(param_options['enum']))
+            
+            # Store the parameter value in a dictionary, using the parameter name as the key
+            request_dict[param_name] = {"in": param_in,"value": value, "name": param_name}
+                
+        submit_button = st.button(label='Call the API')
+
+        # Process the form submission if the submit button is clicked
+        if submit_button:
+            body = extract_sub_dicts_with_key_value(request_dict, "in", "body")
+            form_data = extract_sub_dicts_with_key_value(request_dict, "in", "form_data")
+            params = extract_sub_dicts_with_key_value(request_dict, "in", "path")
+            query_string = extract_sub_dicts_with_key_value(request_dict, "in", "query")
+
+            requestUrl = baseUrl + selected_path
+            pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+/\S+'
+            matches = re.findall(pattern, requestUrl)
+
+            body.extend(form_data)
+            
+            newUrl = replace_placeholders(matches[0], params)
+
+            new_body = {d["name"]: d["value"] for d in body}
+            new_params = {d["name"]: d["value"] for d in params}
+            new_query = {d["name"]: d["value"] for d in query_string}
+
+            response = call_api(newUrl, body=new_body, params= new_query, query_string= new_query, http_verb=verb)
+            st.write("Response", response.json())
+            code = generateCode(URL=newUrl, body=new_body, params=new_params, query_string=new_query, security_header=f"api_key={key}")
+            st.write(code)
+
+    except Exception as e:
+        st.write(e)
 
 if __name__ == "__main__":
     main()
