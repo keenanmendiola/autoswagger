@@ -288,6 +288,47 @@ def replace_placeholders(url, data):
     
     return url
 
+def generateCodeForPath(baseUrl, path):
+    template = """
+            ### System:
+            You are a senior back end developer specialising in API integration.
+            
+            ### User:
+            Create a python function to perform a network request based on the contents of the dictionary provided below.
+            The first key is the path of the endpoint which you will need to concatenate with the baseUrl provided below.
+            The second key is the http verb such as get, post, put, delete. the value of the http verb key are the request details.
+            The request details may include a parameters key that contains needed details for the request body, params, query strings.
+            The request details also describes what the endpoint will consume and produce, and also the security needed, this can be added to the request headers.
+            Do not use the dictionary in the function, extract only the needed values.
+            For the security header, add a comment saying 'you can get this value from your environment variables.'
+            Answer with the properly formatted python code only.
+
+            ### baseUrl:
+            {baseUrl}
+            ### Request Dictionary:
+            {path}
+        """
+    
+    prompt = PromptTemplate(
+        input_variables=["path", "baseUrl"],
+        template = template
+    )
+
+    final_prompt = prompt.format(path=path, baseUrl=baseUrl)
+
+
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=final_prompt,
+        max_tokens=2048, 
+        n=1,            
+        stop=None,       
+        temperature=0  
+    )
+    code =  response.choices[0].text.strip()
+    return code
+
+
 def main():
     st.set_page_config(page_title = "Some Webpage", page_icon = ":tada:", layout="wide")
 
@@ -343,81 +384,101 @@ def main():
 
         paths = swagger_data['paths']
 
-        security = ['apiKey', 'oauth2']
+        security = ['basic','apiKey', 'oauth2']
         selected_security = st.selectbox('Select an option:', security)
 
         if selected_security == "apiKey":
             key = st.text_input("Enter API Key")
         elif selected_security == "apiKey":
             key = st.text_input("Enter Client Id")
-            
-        # Create a dropdown list with the paths
-        selected_path = st.selectbox('Select a path', list(paths.keys()))
+        elif selected_security == 'basic':
+            for path in paths:
+                if "login" in path:
+                    input_values = {}
+                    loginVerb = next(iter(paths[path]))
+                    loginParams = paths[path][loginVerb]["parameters"]
+                    for param in loginParams:
+                        value = st.text_input(param["name"], key=param["name"])
+                        # Store input value in the dictionary
+                        input_values[param["name"]] = value
+                    if st.button("Get Basic Authentication"):
+                        st.write(input_values)
         
-        # Get the request details for the selected path
-        request_details = paths[selected_path]
-        # st.write(request_details)
+        apiCallOptions = st.radio("", ("Generate Code for calling endpoint/s", "Call and Generate code for an endpoint"))
 
-        # Check if there are any parameters defined for the selected path
-        verb = next(iter(request_details))
-        if 'parameters' in request_details[verb]:
-            parameters = request_details[verb]['parameters']
-        else:
-            st.write("Empty")
-            parameters = []
-
-        request_dict = {}
-        # Create a dynamic form based on the request details
-        # with st.form(key='dynamic_form'):
-        # Iterate over the parameters and create the corresponding input fields
-
-
-
-        for parameter in parameters:
-            param_name = parameter['name']
-            param_type = parameter['type']
-            param_options = parameter.get('items', [])
-            param_in = parameter["in"]
-
-            # Determine the appropriate input field based on the parameter type
-            if param_type == 'string':
-                value = st.text_input(param_name)
-            elif param_type == 'integer':
-                value = st.number_input(param_name, step=1, value=0)
-            elif param_type == 'boolean':
-                value = st.checkbox(param_name)
-            elif param_type == 'array':
-                if param_options:
-                    value = st.selectbox('Select a value', list(param_options['enum']))
+        if apiCallOptions == "Generate Code for calling endpoint/s":
+            selected_options = st.multiselect('Select paths', list(paths.keys()))
+            for path in selected_options:
+                generatedCode = generateCodeForPath(baseUrl, paths[path])
+                st.write(generatedCode)
+        elif apiCallOptions == "Call and Generate code for an endpoint":
+        # Create a dropdown list with the paths
+            selected_path = st.selectbox('Select a path', list(paths.keys()))
             
-            # Store the parameter value in a dictionary, using the parameter name as the key
-            request_dict[param_name] = {"in": param_in,"value": value, "name": param_name}
+            # Get the request details for the selected path
+            request_details = paths[selected_path]
+            # st.write(request_details)
+
+            # Check if there are any parameters defined for the selected path
+            verb = next(iter(request_details))
+            if 'parameters' in request_details[verb]:
+                parameters = request_details[verb]['parameters']
+            else:
+                st.write("Empty")
+                parameters = []
+
+            request_dict = {}
+            # Create a dynamic form based on the request details
+            # with st.form(key='dynamic_form'):
+            # Iterate over the parameters and create the corresponding input fields
+
+
+
+            for parameter in parameters:
+                param_name = parameter['name']
+                param_type = parameter['type']
+                param_options = parameter.get('items', [])
+                param_in = parameter["in"]
+
+                # Determine the appropriate input field based on the parameter type
+                if param_type == 'string':
+                    value = st.text_input(param_name)
+                elif param_type == 'integer':
+                    value = st.number_input(param_name, step=1, value=0)
+                elif param_type == 'boolean':
+                    value = st.checkbox(param_name)
+                elif param_type == 'array':
+                    if param_options:
+                        value = st.selectbox('Select a value', list(param_options['enum']))
                 
-        submit_button = st.button(label='Call the API')
+                # Store the parameter value in a dictionary, using the parameter name as the key
+                request_dict[param_name] = {"in": param_in,"value": value, "name": param_name}
+                    
+            submit_button = st.button(label='Call the API')
 
-        # Process the form submission if the submit button is clicked
-        if submit_button:
-            body = extract_sub_dicts_with_key_value(request_dict, "in", "body")
-            form_data = extract_sub_dicts_with_key_value(request_dict, "in", "form_data")
-            params = extract_sub_dicts_with_key_value(request_dict, "in", "path")
-            query_string = extract_sub_dicts_with_key_value(request_dict, "in", "query")
+            # Process the form submission if the submit button is clicked
+            if submit_button:
+                body = extract_sub_dicts_with_key_value(request_dict, "in", "body")
+                form_data = extract_sub_dicts_with_key_value(request_dict, "in", "form_data")
+                params = extract_sub_dicts_with_key_value(request_dict, "in", "path")
+                query_string = extract_sub_dicts_with_key_value(request_dict, "in", "query")
 
-            requestUrl = baseUrl + selected_path
-            pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+/\S+'
-            matches = re.findall(pattern, requestUrl)
+                requestUrl = baseUrl + selected_path
+                pattern = r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+/\S+'
+                matches = re.findall(pattern, requestUrl)
 
-            body.extend(form_data)
-            
-            newUrl = replace_placeholders(matches[0], params)
+                body.extend(form_data)
+                
+                newUrl = replace_placeholders(matches[0], params)
 
-            new_body = {d["name"]: d["value"] for d in body}
-            new_params = {d["name"]: d["value"] for d in params}
-            new_query = {d["name"]: d["value"] for d in query_string}
+                new_body = {d["name"]: d["value"] for d in body}
+                new_params = {d["name"]: d["value"] for d in params}
+                new_query = {d["name"]: d["value"] for d in query_string}
 
-            response = call_api(newUrl, body=new_body, params= new_query, query_string= new_query, http_verb=verb)
-            st.write("Response", response.json())
-            code = generateCode(URL=newUrl, body=new_body, params=new_params, query_string=new_query, security_header=f"api_key={key}")
-            st.write(code)
+                response = call_api(newUrl, body=new_body, params= new_query, query_string= new_query, http_verb=verb)
+                st.write("Response", response.json())
+                code = generateCode(URL=newUrl, body=new_body, params=new_params, query_string=new_query, security_header=f"api_key={key}")
+                st.write(code)
 
     except Exception as e:
         st.write(e)
